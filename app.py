@@ -1,55 +1,88 @@
+import os
+# 必须在所有其他 import 之前
+os.environ["PYTHONIOENCODING"] = "utf-8"
+os.environ["LANG"] = "en_US.UTF-8"
+
 import streamlit as st
+import importlib
+import sys
 
-# --- 页面设置 ---
-st.set_page_config(page_title="赣江游赛事客服", page_icon="🚣")
+# 强制重载 sys 模块（针对某些旧版本 Python 环境的黑科技）
+if sys.getdefaultencoding() != 'utf-8':
+    importlib.reload(sys)
+    # 注意：在 Python 3.x 中 sys.setdefaultencoding 已被移除
+    # 但我们可以通过这种方式干扰底层的 io 行为
 
-# --- 模拟知识库 (后面我们会换成真正的网站抓取数据) ---
-FAKE_KNOWLEDGE = {
-    "报名": "赣江游赛事报名通常在官网首页的‘在线报名’入口进行，需准备身份证件。",
-    "费用": "根据往年信息，报名费用约为200元，具体以官网最新公告为准。",
-    "路线": "赛事路线覆盖赣江核心水域，起点设在八一桥附近，终点在南昌之星摩天轮。"
-}
+import streamlit as st
+from openai import OpenAI
 
-# --- 侧边栏 ---
-with st.sidebar:
-    st.title("关于项目")
-    st.info("这是赣江游赛事的原型机器人。目前处于本地开发阶段。")
-    if st.button("清空对话"):
-        st.session_state.messages = []
-        st.rerun()
+# 配置 DeepSeek 客户端
+# 注意：正式部署到 AWS 时，请通过环境变量设置，不要硬编码 Key
+client = OpenAI(
+    api_key="sk-b1cb03197f3242a18dffd1f84ba06c1e", 
+    base_url="https://api.deepseek.com"
+)
 
-# --- 主界面 ---
-st.title("🚣 赣江游赛事客服 (本地版)")
+st.set_page_config(page_title="赣江游赛事助手", page_icon="🏊")
 
+# 加载知识库
+@st.cache_data
+def load_context():
+    with open("ganjiang_knowledge.txt", "r", encoding="utf-8") as f:
+        return f.read()
+
+context = load_context()
+
+st.title("🏊 赣江游赛事 AI 客服")
+st.info("我是基于官网最新数据生成的智能助手。如果问题超出官网信息，我会回答‘不知道’。")
+
+# 初始化会话状态
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 显示聊天历史
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+# 显示对话历史
+for msg in st.session_state.messages:
+    st.chat_message(msg["role"]).write(msg["content"])
 
-# 用户输入逻辑
-if prompt := st.chat_input("您可以问我关于报名、费用或路线的问题"):
-    # 展示用户消息
+# 用户输入
+if prompt := st.chat_input():
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+    st.chat_message("user").write(prompt)
 
-    # 简单的逻辑处理
+    safe_context = context.encode('utf-8', errors='ignore').decode('utf-8')
+    # 构造 Prompt
+    system_instr = f"""你是一个赣江游赛事的在线客服。
+请【严格】根据以下提供的背景信息回答。
+如果背景信息里没有相关内容，请直接回答“我没有在官网上找到相关信息，建议咨询人工客服”。
+严禁胡编乱造，严禁回答与赣江游赛事无关的问题。
+
+背景信息如下：
+{safe_context}  
+"""
+
     with st.chat_message("assistant"):
-        response = ""
-        # 模拟检索逻辑
-        found = False
-        for key in FAKE_KNOWLEDGE:
-            if key in prompt:
-                response = FAKE_KNOWLEDGE[key]
-                found = True
-                break
+        # 这里的 stream=True 可以让回答像 ChatGPT 一样一个字一个字跳出来
+        response_placeholder = st.empty()
+        full_response = ""
         
-        if not found:
-            response = "我没有找到相关信息。"
+        try:
+            stream = client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": system_instr},
+                    *st.session_state.messages # 包含上下文对话
+                ],
+                stream=True,
+                temperature=0 # 关键：确保不胡说八道
+            )
             
-        st.markdown(response)
-        st.session_state.messages.append({"role": "assistant", "content": response})
-        
+            for chunk in stream:
+                if chunk.choices[0].delta.content:
+                    full_response += chunk.choices[0].delta.content
+                    response_placeholder.markdown(full_response + "▌")
+            
+            response_placeholder.markdown(full_response)
+            st.session_state.messages.append({"role": "assistant", "content": full_response})
+            
+        except Exception as e:
+            st.error(f"出错了: {str(e)}")
