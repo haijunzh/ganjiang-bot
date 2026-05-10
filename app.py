@@ -1,5 +1,10 @@
 import os
+from dotenv import load_dotenv
 # 必须在所有其他 import 之前
+load_dotenv()
+api_key = os.getenv("DEEPSEEK_API_KEY")
+api_url = os.getenv("DEEPSEEK_API_URL")
+
 os.environ["PYTHONIOENCODING"] = "utf-8"
 os.environ["LANG"] = "en_US.UTF-8"
 
@@ -19,8 +24,8 @@ from openai import OpenAI
 # 配置 DeepSeek 客户端
 # 注意：正式部署到 AWS 时，请通过环境变量设置，不要硬编码 Key
 client = OpenAI(
-    api_key="sk-b1cb03197f3242a18dffd1f84ba06c1e", 
-    base_url="https://api.deepseek.com"
+    api_key=api_key,
+    base_url=api_url
 )
 
 st.set_page_config(page_title="赣江游赛事助手", page_icon="🏊")
