@@ -30,6 +30,15 @@ client = OpenAI(
 
 st.set_page_config(page_title="赣江游赛事助手", page_icon="🏊")
 
+with st.sidebar:
+    st.title("项目信息")
+    st.info("🏊 赣江游赛事 AI 客服\n基于 2026 官网数据构建")
+    
+    # 添加清除按钮
+    if st.button("🗑️ 清除聊天记录", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+
 # 加载知识库
 @st.cache_data
 def load_context():
