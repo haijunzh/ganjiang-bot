@@ -10,32 +10,61 @@ load_dotenv()
 os.environ["PYTHONIOENCODING"] = "utf-8"
 os.environ["LANG"] = "en_US.UTF-8"
 
-# 强制编码重载（针对特定环境）
 if sys.getdefaultencoding() != 'utf-8':
     importlib.reload(sys)
 
-st.set_page_config(page_title="赣江游赛事助手", page_icon="🏊", layout="wide")
+st.set_page_config(page_title="Ganjiang Swim AI", page_icon="🏊", layout="wide")
 
-# 2. 侧边栏配置：信息展示 + 模型切换 + 清除记录
+# --- 2. 双语字典配置 ---
+LANG_DICT = {
+    "中文": {
+        "title": "🏊 赣江游赛事 AI 客服",
+        "sidebar_title": "控制面板",
+        "select_model": "选择 AI 模型",
+        "select_lang": "选择语言 / Language",
+        "project_info": "🏊 赣江游赛事 AI 客服\n基于官网数据构建",
+        "clear_history": "🗑️ 清除聊天记录",
+        "caption": "当前运行大脑: {model} | 数据源: 赣江游官网",
+        "info": "我是基于官网最新数据生成的智能助手。如果问题超出官网信息，我会回答‘没有找到相关信息’。",
+        "input_placeholder": "请输入您想咨询的问题...",
+        "error_msg": "调用 {model} 出错了: {error}",
+        "no_info": "我没有在官网上找到相关信息，建议咨询人工客服",
+        "system_role": "你是一个赣江游赛事的在线客服。请【严格】根据背景信息回答。严禁胡编乱造。"
+    },
+    "English": {
+        "title": "🏊 Ganjiang Open Water Swim AI Assistant",
+        "sidebar_title": "Control Panel",
+        "select_model": "Select AI Model",
+        "select_lang": "Language / 选择语言",
+        "project_info": "🏊 Ganjiang Open Water Swim AI Assistant\nBuilt on Official Website Data",
+        "clear_history": "🗑️ Clear Chat History",
+        "caption": "Current Model: {model} | Source: Official Site",
+        "info": "I am an intelligent assistant based on official data. If the question exceeds the data, I will say 'No information found'.",
+        "input_placeholder": "Type your question here...",
+        "error_msg": "Error with {model}: {error}",
+        "no_info": "I couldn't find relevant information on the official website. Please contact human support.",
+        "system_role": "You are a customer service assistant for the Ganjiang Swim event. Reply strictly based on the background information. Do not hallucinate."
+    }
+}
+
+# --- 3. 侧边栏：语言与模型选择 ---
 with st.sidebar:
-    st.title("控制面板")
+    st.title("Settings")
     
-    # --- 新增功能：模型选择 ---
-    model_choice = st.selectbox(
-        "选择 AI 模型",
-        ("DeepSeek", "ChatGPT"),
-        index=0,
-        help="DeepSeek 中文理解强，ChatGPT 逻辑严密"
-    )
+    # 语言选择
+    lang_choice = st.selectbox("Language / 语言", ("中文", "English"), index=0)
+    T = LANG_DICT[lang_choice]  # 所有的文本都从这个变量获取
     
-    st.info("🏊 赣江游赛事 AI 客服\n基于官网数据构建")
+    # 模型选择
+    model_choice = st.selectbox(T["select_model"], ("DeepSeek", "ChatGPT"), index=0)
     
-    # 清除按钮
-    if st.button("🗑️ 清除聊天记录", use_container_width=True):
+    st.info(T["project_info"])
+    
+    if st.button(T["clear_history"], use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
-# 3. 初始化对应的 API 客户端
+# --- 4. 初始化 API 客户端 ---
 def get_api_config(choice):
     if choice == "DeepSeek":
         return {
@@ -47,58 +76,51 @@ def get_api_config(choice):
         }
     else:
         return {
-            "client": OpenAI(
-                api_key=os.getenv("OPENAI_API_KEY")
-            ),
-            "model_name": "gpt-4o"  # 推荐使用 gpt-4o
+            "client": OpenAI(api_key=os.getenv("OPENAI_API_KEY")),
+            "model_name": "gpt-4o"
         }
 
 config = get_api_config(model_choice)
 client = config["client"]
 model_name = config["model_name"]
 
-# 4. 加载知识库
+# --- 5. 加载知识库 ---
 @st.cache_data
 def load_context():
     try:
         with open("ganjiang_knowledge.txt", "r", encoding="utf-8") as f:
             return f.read()
     except FileNotFoundError:
-        return "暂无官网具体背景信息。"
+        return "No background information available."
 
 context = load_context()
 
-# 5. 主界面标题
-st.title("🏊 赣江游赛事 AI 客服")
-st.caption(f"当前运行大脑: {model_choice} | 数据源: 赣江游官网")
-st.info("我是基于官网最新数据生成的智能助手。如果问题超出官网信息，我会回答‘没有找到相关信息’。")
+# --- 6. 主界面渲染 ---
+st.title(T["title"])
+st.caption(T["caption"].format(model=model_choice))
+st.info(T["info"])
 
-# 6. 初始化会话状态
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# 显示对话历史
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-# 7. 用户输入与 AI 响应逻辑
-if prompt := st.chat_input("请输入您想咨询的问题..."):
-    # 记录用户输入
+# --- 7. 聊天交互逻辑 ---
+if prompt := st.chat_input(T["input_placeholder"]):
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
 
-    # 准备上下文背景（严格限制）
     safe_context = context.encode('utf-8', errors='ignore').decode('utf-8')
-    system_instr = f"""你是一个赣江游赛事的在线客服。
-请【严格】根据以下提供的背景信息回答。
-如果背景信息里没有相关内容，请直接回答“我没有在官网上找到相关信息，建议咨询人工客服”。
-严禁胡编乱造，严禁回答与赣江游赛事无关的问题。
-
-背景信息如下：
-{safe_context}  
+    
+    # 根据语言动态调整系统指令
+    system_instr = f"""{T['system_role']}
+Background Information:
+{safe_context}
+Default reply for missing info: {T['no_info']}
+Please reply in the language the user is using: {lang_choice}.
 """
 
-    # AI 生成回答 (Stream 流式输出)
     with st.chat_message("assistant"):
         response_placeholder = st.empty()
         full_response = ""
@@ -111,7 +133,7 @@ if prompt := st.chat_input("请输入您想咨询的问题..."):
                     *st.session_state.messages 
                 ],
                 stream=True,
-                temperature=0  # 保持答案的确定性
+                temperature=0 
             )
             
             for chunk in stream:
@@ -123,4 +145,4 @@ if prompt := st.chat_input("请输入您想咨询的问题..."):
             st.session_state.messages.append({"role": "assistant", "content": full_response})
             
         except Exception as e:
-            st.error(f"调用 {model_choice} 出错了: {str(e)}")
+            st.error(T["error_msg"].format(model=model_choice, error=str(e)))
