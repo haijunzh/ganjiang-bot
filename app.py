@@ -1,56 +1,79 @@
 import os
 from dotenv import load_dotenv
-# 必须在所有其他 import 之前
-load_dotenv()
-api_key = os.getenv("DEEPSEEK_API_KEY")
-api_url = os.getenv("DEEPSEEK_API_URL")
-
-os.environ["PYTHONIOENCODING"] = "utf-8"
-os.environ["LANG"] = "en_US.UTF-8"
-
 import streamlit as st
 import importlib
 import sys
-
-# 强制重载 sys 模块（针对某些旧版本 Python 环境的黑科技）
-if sys.getdefaultencoding() != 'utf-8':
-    importlib.reload(sys)
-    # 注意：在 Python 3.x 中 sys.setdefaultencoding 已被移除
-    # 但我们可以通过这种方式干扰底层的 io 行为
-
-import streamlit as st
 from openai import OpenAI
 
-# 配置 DeepSeek 客户端
-# 注意：正式部署到 AWS 时，请通过环境变量设置，不要硬编码 Key
-client = OpenAI(
-    api_key=api_key,
-    base_url=api_url
-)
+# 1. 基础配置与环境加载
+load_dotenv()
+os.environ["PYTHONIOENCODING"] = "utf-8"
+os.environ["LANG"] = "en_US.UTF-8"
 
-st.set_page_config(page_title="赣江游赛事助手", page_icon="🏊")
+# 强制编码重载（针对特定环境）
+if sys.getdefaultencoding() != 'utf-8':
+    importlib.reload(sys)
 
+st.set_page_config(page_title="赣江游赛事助手", page_icon="🏊", layout="wide")
+
+# 2. 侧边栏配置：信息展示 + 模型切换 + 清除记录
 with st.sidebar:
-    st.title("项目信息")
-    st.info("🏊 赣江游赛事 AI 客服\n基于 2026 官网数据构建")
+    st.title("控制面板")
     
-    # 添加清除按钮
+    # --- 新增功能：模型选择 ---
+    model_choice = st.selectbox(
+        "选择 AI 模型",
+        ("DeepSeek", "ChatGPT"),
+        index=0,
+        help="DeepSeek 中文理解强，ChatGPT 逻辑严密"
+    )
+    
+    st.info("🏊 赣江游赛事 AI 客服\n基于官网数据构建")
+    
+    # 清除按钮
     if st.button("🗑️ 清除聊天记录", use_container_width=True):
         st.session_state.messages = []
         st.rerun()
 
-# 加载知识库
+# 3. 初始化对应的 API 客户端
+def get_api_config(choice):
+    if choice == "DeepSeek":
+        return {
+            "client": OpenAI(
+                api_key=os.getenv("DEEPSEEK_API_KEY"),
+                base_url=os.getenv("DEEPSEEK_API_URL", "https://api.deepseek.com")
+            ),
+            "model_name": "deepseek-chat"
+        }
+    else:
+        return {
+            "client": OpenAI(
+                api_key=os.getenv("OPENAI_API_KEY")
+            ),
+            "model_name": "gpt-4o"  # 推荐使用 gpt-4o
+        }
+
+config = get_api_config(model_choice)
+client = config["client"]
+model_name = config["model_name"]
+
+# 4. 加载知识库
 @st.cache_data
 def load_context():
-    with open("ganjiang_knowledge.txt", "r", encoding="utf-8") as f:
-        return f.read()
+    try:
+        with open("ganjiang_knowledge.txt", "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "暂无官网具体背景信息。"
 
 context = load_context()
 
+# 5. 主界面标题
 st.title("🏊 赣江游赛事 AI 客服")
-st.info("我是基于官网最新数据生成的智能助手。如果问题超出官网信息，我会回答‘不知道’。")
+st.caption(f"当前运行大脑: {model_choice} | 数据源: 赣江游官网")
+st.info("我是基于官网最新数据生成的智能助手。如果问题超出官网信息，我会回答‘没有找到相关信息’。")
 
-# 初始化会话状态
+# 6. 初始化会话状态
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
@@ -58,13 +81,14 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-# 用户输入
-if prompt := st.chat_input():
+# 7. 用户输入与 AI 响应逻辑
+if prompt := st.chat_input("请输入您想咨询的问题..."):
+    # 记录用户输入
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
 
+    # 准备上下文背景（严格限制）
     safe_context = context.encode('utf-8', errors='ignore').decode('utf-8')
-    # 构造 Prompt
     system_instr = f"""你是一个赣江游赛事的在线客服。
 请【严格】根据以下提供的背景信息回答。
 如果背景信息里没有相关内容，请直接回答“我没有在官网上找到相关信息，建议咨询人工客服”。
@@ -74,20 +98,20 @@ if prompt := st.chat_input():
 {safe_context}  
 """
 
+    # AI 生成回答 (Stream 流式输出)
     with st.chat_message("assistant"):
-        # 这里的 stream=True 可以让回答像 ChatGPT 一样一个字一个字跳出来
         response_placeholder = st.empty()
         full_response = ""
         
         try:
             stream = client.chat.completions.create(
-                model="deepseek-chat",
+                model=model_name,
                 messages=[
                     {"role": "system", "content": system_instr},
-                    *st.session_state.messages # 包含上下文对话
+                    *st.session_state.messages 
                 ],
                 stream=True,
-                temperature=0 # 关键：确保不胡说八道
+                temperature=0  # 保持答案的确定性
             )
             
             for chunk in stream:
@@ -99,4 +123,4 @@ if prompt := st.chat_input():
             st.session_state.messages.append({"role": "assistant", "content": full_response})
             
         except Exception as e:
-            st.error(f"出错了: {str(e)}")
+            st.error(f"调用 {model_choice} 出错了: {str(e)}")
