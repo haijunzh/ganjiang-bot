@@ -6,6 +6,7 @@ import sys
 from openai import OpenAI
 
 # 1. 基础配置与环境加载
+# 1. Basic configuration and environment loading
 load_dotenv()
 os.environ["PYTHONIOENCODING"] = "utf-8"
 os.environ["LANG"] = "en_US.UTF-8"
@@ -16,6 +17,7 @@ if sys.getdefaultencoding() != 'utf-8':
 st.set_page_config(page_title="Ganjiang Swim AI", page_icon="🏊", layout="wide")
 
 # --- 2. 双语字典配置 ---
+# --- 2. Bilingual dictionary configuration ---
 LANG_DICT = {
     "中文": {
         "title": "🏊 赣江游赛事 AI 客服",
@@ -48,6 +50,7 @@ LANG_DICT = {
 }
 
 # --- 3. 侧边栏：语言与模型选择 ---
+# --- 3. Sidebar: Language and Model Selection ---
 with st.sidebar:
     st.title("Settings")
     
@@ -65,6 +68,7 @@ with st.sidebar:
         st.rerun()
 
 # --- 4. 初始化 API 客户端 ---
+# --- 4. Initialize API Client ---
 def get_api_config(choice):
     if choice == "DeepSeek":
         return {
@@ -85,6 +89,7 @@ client = config["client"]
 model_name = config["model_name"]
 
 # --- 5. 加载知识库 ---
+# --- 5. Load Knowledge Base ---
 @st.cache_data
 def load_context():
     try:
@@ -96,6 +101,7 @@ def load_context():
 context = load_context()
 
 # --- 6. 主界面渲染 ---
+# --- 6. Main Interface Rendering ---
 st.title(T["title"])
 st.caption(T["caption"].format(model=model_choice))
 st.info(T["info"])
@@ -107,6 +113,7 @@ for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
 # --- 7. 聊天交互逻辑 ---
+# --- 7. Chat Interaction Logic ---
 if prompt := st.chat_input(T["input_placeholder"]):
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
@@ -118,7 +125,7 @@ if prompt := st.chat_input(T["input_placeholder"]):
 Background Information:
 {safe_context}
 Default reply for missing info: {T['no_info']}
-Please reply in the language the user is using: {lang_choice}.
+Please reply in the language the user is using.
 """
 
     with st.chat_message("assistant"):
