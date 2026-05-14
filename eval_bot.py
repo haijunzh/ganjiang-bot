@@ -2,13 +2,33 @@ import os
 import json
 from openai import OpenAI
 from dotenv import load_dotenv
+from websockets import client
 
-# Load environment variables from .env file
+# Load environment variables
 load_dotenv()
 
-# Initialize OpenAI client
-# Use gpt-4o as the 'Judge' for higher evaluation accuracy
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+# --- CONFIGURATION ---
+# Initialize clients
+chatgpt_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))    
+deepseek_client = OpenAI(
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    base_url=os.getenv("DEEPSEEK_API_URL") # Usually https://api.deepseek.com
+)
+
+# bot_client = deepseek_client
+# bot_model="deepseek-chat"
+# judge_client = chatgpt_client
+# judge_model="gpt-4o"
+
+bot_client = chatgpt_client
+bot_model="gpt-5.5"
+judge_client = chatgpt_client
+judge_model="gpt-4o"
+
+# bot_client = chatgpt_client
+# bot_model="gpt-4o"
+# judge_client = chatgpt_client
+# judge_model="gpt-4o"
 
 def load_knowledge_base():
     """Reads the local knowledge base file."""
@@ -19,40 +39,39 @@ def load_knowledge_base():
         print("Error: ganjiang_knowledge.txt not found.")
         return ""
 
-def get_bot_answer(question, context):
-    """Simulates the bot's logic to generate an answer based on context."""
+def get_bot_answer(question, context, bot_client=bot_client, bot_model=bot_model):
+    """
+    Simulates the DeepSeek bot's logic.
+    """
     system_instruction = (
         f"You are a professional customer service for the Ganjiang Swim event.\n"
         f"Answer the question STRICTLY based on the following context:\n{context}\n"
-        f"If the info is not in the context, say 'Information not found'."
+        f"If the info is not in the context, say that you have not found any information about that.\n"
+        f"Please reply in the language the user is using."
     )
     
     try:
-        response = client.chat.completions.create(
-            model="gpt-4o",  # You can change this to "deepseek-chat" to test DeepSeek
+        response = bot_client.chat.completions.create(
+            model=bot_model,
             messages=[
                 {"role": "system", "content": system_instruction},
                 {"role": "user", "content": question}
             ],
-            temperature=0  # Zero temperature for consistent, reproducible results
+            temperature=1
         )
         return response.choices[0].message.content
     except Exception as e:
-        return f"Error generating answer: {str(e)}"
+        return f"DeepSeek Error: {str(e)}"
 
-def judge_answer(question, bot_answer, ideal_answer):
-    """
-    The 'LLM-as-a-Judge' logic. 
-    Compares bot output with ground truth and assigns a score.
-    """
+def judge_answer(question, bot_answer, ideal_answer, judge_client=judge_client, judge_model=judge_model):
     evaluation_prompt = f"""
-    You are a strict quality auditor for an AI chatbot.
-    Compare the [Bot Answer] against the [Ideal Answer] based on the [Question].
+    You are a strict quality auditor. 
+    Compare the [Bot Answer] against the [Ideal Answer].
 
     Scoring Rules:
-    - 1.0: The answer is accurate and matches the ideal answer's key points.
-    - 0.5: The answer is partially correct or misses minor details.
-    - 0.0: The answer is wrong, irrelevant, or contains hallucinations.
+    - 1.0: Excellent, matches key facts.
+    - 0.5: Partially correct or missing minor details.
+    - 0.0: Incorrect or hallucinated.
 
     ---
     Question: {question}
@@ -60,12 +79,13 @@ def judge_answer(question, bot_answer, ideal_answer):
     Bot Answer: {bot_answer}
     ---
 
-    Output ONLY the numerical score (1, 0.5, or 0). Do not include any explanation.
+    Output ONLY the numerical score (1, 0.5, or 0).
     """
     
     try:
-        res = client.chat.completions.create(
-            model="gpt-4o",
+        # Always use a powerful model like GPT-4o to judge
+        res = judge_client.chat.completions.create(
+            model=judge_model,
             messages=[{"role": "user", "content": evaluation_prompt}],
             temperature=0
         )
@@ -74,13 +94,11 @@ def judge_answer(question, bot_answer, ideal_answer):
     except Exception:
         return 0.0
 
-def run_evaluation():
-    # 1. Setup
+def run_evaluation(bot_client=bot_client, bot_model=bot_model, judge_client=judge_client, judge_model=judge_model):
     knowledge = load_knowledge_base()
-    if not knowledge:
-        return
+    if not knowledge: return
 
-    # 2. Load test cases
+    # Load the 10 test cases from test_cases.json
     try:
         with open("test_cases.json", "r", encoding="utf-8") as f:
             test_cases = json.load(f)
@@ -88,30 +106,27 @@ def run_evaluation():
         print(f"Failed to load test_cases.json: {e}")
         return
 
-    # 3. Execution loop
     total_score = 0
     num_cases = len(test_cases)
-    print(f"--- Starting Evaluation on {num_cases} cases ---")
+    print(f"Bot Model: {bot_model}, Judge Model: {judge_model}")
+    print(f"--- Starting Bot Evaluation ({num_cases} cases) ---")
 
     for i, case in enumerate(test_cases):
-        q = case.get("question")
-        ideal = case.get("ideal_answer")
+        q = case.get("question") #[cite: 1]
+        ideal = case.get("ideal_answer") #[cite: 1]
         
-        # Get response from the bot
-        bot_ans = get_bot_answer(q, knowledge)
-        
-        # Judge the response
-        score = judge_answer(q, bot_ans, ideal)
+        bot_ans = get_bot_answer(q, knowledge, bot_client=bot_client, bot_model=bot_model)
+        score = judge_answer(q, bot_ans, ideal, judge_client=judge_client, judge_model=judge_model)
         total_score += score
         
         print(f"[{i+1}/{num_cases}] Score: {score}")
         print(f"Q: {q}")
-        print(f"Bot: {bot_ans}")
+        print(f"Bot Answer: {bot_ans}")
+        print(f"Ideal Answer: {ideal}")
         print("-" * 20)
 
-    # 4. Final Report
     accuracy = (total_score / num_cases) * 100
-    print(f"\nEvaluation Complete!")
+    print(f"\nBot Evaluation Complete!")
     print(f"Total Score: {total_score} / {num_cases}")
     print(f"Accuracy Rate: {accuracy:.2f}%")
 
